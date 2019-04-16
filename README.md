@@ -1,3 +1,3 @@
-# electricui-protocol-binary-fifo-queue
+# electricui-protocol-binary-large-packet-handler
 
-The deduplicating fifo queue for the binary protocol.
+The large packet handler
