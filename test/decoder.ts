@@ -53,6 +53,48 @@ function makeOffsetPacketPartMessage(
   return message
 }
 
+function shuffle<T>(arr: Array<T>) {
+  let input = arr
+
+  for (let i = input.length - 1; i >= 0; i--) {
+    let randomIndex = Math.floor(Math.random() * (i + 1))
+    let itemAtIndex = input[randomIndex]
+
+    input[randomIndex] = input[i]
+    input[i] = itemAtIndex
+  }
+
+  return input
+}
+
+function* splitBigPacket(buf: Buffer, maxPacketSize: number) {
+  let offset = 0
+  let done = false
+
+  while (!done) {
+    const start = offset
+    const end = Math.min(offset + maxPacketSize, buf.length)
+    offset = end
+
+    done = end === buf.length
+
+    yield {
+      offset: start,
+      payload: buf.slice(start, end),
+    }
+  }
+}
+
+function* splitMessageIntoPieces(message: Message, maxPacketSize: number) {
+  for (const splitPacket of splitBigPacket(message.payload, maxPacketSize)) {
+    const newPacket = new Message(message.messageID, splitPacket.payload)
+    newPacket.metadata = Object.assign({}, message.metadata) // copy all metadata
+    newPacket.metadata.offset = splitPacket.offset
+
+    yield newPacket
+  }
+}
+
 describe('BinaryLargePacketHandlerDecoder', () => {
   it('non-offset packets pass through without modification', () => {
     const { source, sink, spy } = setupPipeline()
@@ -69,6 +111,18 @@ describe('BinaryLargePacketHandlerDecoder', () => {
 
     const messageID = 'abc'
     const type = TYPES.CUSTOM_MARKER
+    const content = Buffer.from([
+      0x00,
+      0x01,
+      0x02,
+      0x03,
+      0x04,
+      0x05,
+      0x06,
+      0x07,
+      0x08,
+      0x09,
+    ])
 
     // Begin the large packet transfer
     const begin = new Message(
@@ -79,51 +133,36 @@ describe('BinaryLargePacketHandlerDecoder', () => {
 
     source.push(begin)
 
-    // Generate all the parts
-    const part0 = makeOffsetPacketPartMessage(messageID, type, 0, Buffer.from([0x00])) // prettier-ignore
-    const part1 = makeOffsetPacketPartMessage(messageID, type, 1, Buffer.from([0x01])) // prettier-ignore
-    const part2 = makeOffsetPacketPartMessage(messageID, type, 2, Buffer.from([0x02])) // prettier-ignore
-    const part3 = makeOffsetPacketPartMessage(messageID, type, 3, Buffer.from([0x03])) // prettier-ignore
-    const part4 = makeOffsetPacketPartMessage(messageID, type, 4, Buffer.from([0x04])) // prettier-ignore
-    const part5 = makeOffsetPacketPartMessage(messageID, type, 5, Buffer.from([0x05])) // prettier-ignore
-    const part6 = makeOffsetPacketPartMessage(messageID, type, 6, Buffer.from([0x06])) // prettier-ignore
-    const part7 = makeOffsetPacketPartMessage(messageID, type, 7, Buffer.from([0x07])) // prettier-ignore
-    const part8 = makeOffsetPacketPartMessage(messageID, type, 8, Buffer.from([0x08])) // prettier-ignore
-    const part9 = makeOffsetPacketPartMessage(messageID, type, 9, Buffer.from([0x09])) // prettier-ignore
+    // Generate the messages, write them in reverse order
+    const bigMessage = new Message(messageID, content)
+    bigMessage.metadata.type = type
 
-    // write them in reverse order
-    source.push(part9)
-    source.push(part8)
-    source.push(part7)
-    source.push(part6)
-    source.push(part5)
-    source.push(part4)
-    source.push(part3)
-    source.push(part2)
-    source.push(part1)
-    source.push(part0)
+    for (const part of Array.from(
+      splitMessageIntoPieces(bigMessage, 1),
+    ).reverse()) {
+      source.push(part)
+    }
 
     const receivedPacket = spy.getCall(0).args[0]
-    assert.isTrue(
-      Buffer.from([
-        0x00,
-        0x01,
-        0x02,
-        0x03,
-        0x04,
-        0x05,
-        0x06,
-        0x07,
-        0x08,
-        0x09,
-      ]).equals(receivedPacket.payload),
-    )
+    assert.isTrue(content.equals(receivedPacket.payload))
   })
   it("an offset packet is reconstructed properly when sent in a 'forward' order", () => {
     const { source, sink, spy } = setupPipeline()
 
     const messageID = 'abc'
     const type = TYPES.CUSTOM_MARKER
+    const content = Buffer.from([
+      0x00,
+      0x01,
+      0x02,
+      0x03,
+      0x04,
+      0x05,
+      0x06,
+      0x07,
+      0x08,
+      0x09,
+    ])
 
     // Begin the large packet transfer
     const begin = new Message(
@@ -134,44 +173,88 @@ describe('BinaryLargePacketHandlerDecoder', () => {
 
     source.push(begin)
 
-    // Generate all the parts
-    const part0 = makeOffsetPacketPartMessage(messageID, type, 0, Buffer.from([0x00])) // prettier-ignore
-    const part1 = makeOffsetPacketPartMessage(messageID, type, 1, Buffer.from([0x01])) // prettier-ignore
-    const part2 = makeOffsetPacketPartMessage(messageID, type, 2, Buffer.from([0x02])) // prettier-ignore
-    const part3 = makeOffsetPacketPartMessage(messageID, type, 3, Buffer.from([0x03])) // prettier-ignore
-    const part4 = makeOffsetPacketPartMessage(messageID, type, 4, Buffer.from([0x04])) // prettier-ignore
-    const part5 = makeOffsetPacketPartMessage(messageID, type, 5, Buffer.from([0x05])) // prettier-ignore
-    const part6 = makeOffsetPacketPartMessage(messageID, type, 6, Buffer.from([0x06])) // prettier-ignore
-    const part7 = makeOffsetPacketPartMessage(messageID, type, 7, Buffer.from([0x07])) // prettier-ignore
-    const part8 = makeOffsetPacketPartMessage(messageID, type, 8, Buffer.from([0x08])) // prettier-ignore
-    const part9 = makeOffsetPacketPartMessage(messageID, type, 9, Buffer.from([0x09])) // prettier-ignore
+    // Generate the messages, write them in forward
+    const bigMessage = new Message(messageID, content)
+    bigMessage.metadata.type = type
 
-    // write them in forward order
-    source.push(part0)
-    source.push(part1)
-    source.push(part2)
-    source.push(part3)
-    source.push(part4)
-    source.push(part5)
-    source.push(part6)
-    source.push(part7)
-    source.push(part8)
-    source.push(part9)
+    for (const part of splitMessageIntoPieces(bigMessage, 1)) {
+      source.push(part)
+    }
 
     const receivedPacket = spy.getCall(0).args[0]
-    assert.isTrue(
-      Buffer.from([
-        0x00,
-        0x01,
-        0x02,
-        0x03,
-        0x04,
-        0x05,
-        0x06,
-        0x07,
-        0x08,
-        0x09,
-      ]).equals(receivedPacket.payload),
+    assert.isTrue(content.equals(receivedPacket.payload))
+  })
+  it('an offset packet is reconstructed properly when sent in a random order', () => {
+    const { source, sink, spy } = setupPipeline()
+
+    const messageID = 'abc'
+    const type = TYPES.CUSTOM_MARKER
+    const content = Buffer.from([
+      0x00,
+      0x01,
+      0x02,
+      0x03,
+      0x04,
+      0x05,
+      0x06,
+      0x07,
+      0x08,
+      0x09,
+    ])
+
+    // Begin the large packet transfer
+    const begin = new Message(
+      messageID,
+      Buffer.from(Uint16Array.from([0, 10]).buffer),
     )
+    begin.metadata.type = TYPES.OFFSET_METADATA
+
+    source.push(begin)
+
+    // Generate the messages, write them in forward
+    const bigMessage = new Message(messageID, content)
+    bigMessage.metadata.type = type
+
+    for (const part of shuffle(
+      Array.from(splitMessageIntoPieces(bigMessage, 1)),
+    )) {
+      source.push(part)
+    }
+
+    const receivedPacket = spy.getCall(0).args[0]
+    assert.isTrue(content.equals(receivedPacket.payload))
+  })
+  it('a huge offset packet is reconstructed properly when sent in a random order', () => {
+    const { source, sink, spy } = setupPipeline()
+
+    const messageID = 'abc'
+    const type = TYPES.CUSTOM_MARKER
+    const content = Buffer.from(
+      Object.keys(Array(401).join('\u0000')).map(i => parseInt(i, 10)),
+    )
+
+    // Begin the large packet transfer
+    const begin = new Message(
+      messageID,
+      Buffer.from(Uint16Array.from([0, content.length]).buffer),
+    )
+    begin.metadata.type = TYPES.OFFSET_METADATA
+
+    source.push(begin)
+
+    // Generate the messages, write them in forward
+    const bigMessage = new Message(messageID, content)
+    bigMessage.metadata.type = type
+
+    for (const part of shuffle(
+      Array.from(
+        splitMessageIntoPieces(bigMessage, Math.floor(Math.random() * 100)),
+      ),
+    )) {
+      source.push(part)
+    }
+
+    const receivedPacket = spy.getCall(0).args[0]
+    assert.isTrue(content.equals(receivedPacket.payload))
   })
 })

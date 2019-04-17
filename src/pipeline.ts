@@ -34,7 +34,7 @@ export class DeveloperNamespacePipelineSplitter extends Pipeline {
 /**
  * The type cache duplex pipeline
  */
-export default class BinaryTypeCachePipeline extends DuplexPipeline {
+export default class BinaryLargePacketHandlerPipeline extends DuplexPipeline {
   readPipelineInternal: BinaryLargePacketHandlerDecoder
   readPipelineDeveloper: BinaryLargePacketHandlerDecoder
   writePipelineInternal: BinaryLargePacketHandlerEncoder
