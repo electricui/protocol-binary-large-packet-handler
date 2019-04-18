@@ -3,7 +3,7 @@ import 'mocha'
 import * as chai from 'chai'
 import * as sinon from 'sinon'
 
-import { Message, Sink, Source } from '@electricui/core'
+import { Message, Sink, Source, ConnectionInterface } from '@electricui/core'
 import { MESSAGEIDS, TYPES } from '@electricui/protocol-binary-constants'
 
 import BinaryLargePacketHandlerDecoder from '../src/decoder'
@@ -22,21 +22,36 @@ class TestSink extends Sink {
   }
 }
 
-function setupPipeline() {
+function setupPipeline(
+  writeCallback: (message: Message) => Promise<any> = async () => {},
+) {
   const spy = sinon.spy()
+  const connectionInterfaceWriteSpy = sinon.spy()
+  const connectionInterface = new ConnectionInterface()
 
   const source = new Source()
-  const encoder = new BinaryLargePacketHandlerDecoder({
+  const decoder = new BinaryLargePacketHandlerDecoder({
     loopTime: 1,
+    connectionInterface,
+    externalTiming: true, // we take over timing
   })
   const sink = new TestSink(spy)
 
-  source.pipe(encoder).pipe(sink)
+  // override the connectionInterface write function
+  connectionInterface.write = (message: Message) => {
+    connectionInterfaceWriteSpy(message)
+    return writeCallback(message)
+  }
+
+  source.pipe(decoder).pipe(sink)
 
   return {
     source,
     sink,
     spy,
+    connectionInterface,
+    connectionInterfaceWriteSpy,
+    decoder,
   }
 }
 
@@ -252,6 +267,87 @@ describe('BinaryLargePacketHandlerDecoder', () => {
       ),
     )) {
       source.push(part)
+    }
+
+    const receivedPacket = spy.getCall(0).args[0]
+    assert.isTrue(content.equals(receivedPacket.payload))
+  })
+  it("re-requests packets when they don't arrive on time", () => {
+    const writeCallback = async (message: Message) => {
+      // console.log('received message in the write callback, ', message)
+    }
+
+    const {
+      source,
+      sink,
+      spy,
+      decoder,
+      connectionInterfaceWriteSpy,
+    } = setupPipeline(writeCallback)
+
+    const messageID = 'abc'
+    const type = TYPES.CUSTOM_MARKER
+    const content = Buffer.from([
+      0x00,
+      0x01,
+      0x02,
+      0x03,
+      0x04,
+      0x05,
+      0x06,
+      0x07,
+      0x08,
+      0x09,
+    ])
+
+    // Begin the large packet transfer
+    const begin = new Message(
+      messageID,
+      Buffer.from(Uint16Array.from([0, content.length]).buffer),
+    )
+    begin.metadata.type = TYPES.OFFSET_METADATA
+
+    decoder._getTime = () => 0
+
+    source.push(begin)
+
+    // Generate the messages, write them in forward
+    const bigMessage = new Message(messageID, content)
+    bigMessage.metadata.type = type
+
+    // Only send the even numbered parts
+    for (const [index, part] of Array.from(
+      splitMessageIntoPieces(bigMessage, 1),
+    ).entries()) {
+      if (index % 2 === 0) {
+        source.push(part)
+      }
+      decoder.tick()
+    }
+    // advance the timer,
+    decoder._getTime = () => 1000
+    decoder.tick()
+
+    // check that we have received requests for more data at the correct ranges
+    connectionInterfaceWriteSpy.callCount = 5
+    assert.deepEqual(connectionInterfaceWriteSpy.getCall(0).args[0].payload.start, 1) // prettier-ignore
+    assert.deepEqual(connectionInterfaceWriteSpy.getCall(1).args[0].payload.start, 3) // prettier-ignore
+    assert.deepEqual(connectionInterfaceWriteSpy.getCall(2).args[0].payload.start, 5) // prettier-ignore
+    assert.deepEqual(connectionInterfaceWriteSpy.getCall(3).args[0].payload.start, 7) // prettier-ignore
+    assert.deepEqual(connectionInterfaceWriteSpy.getCall(4).args[0].payload.start, 9) // prettier-ignore
+    assert.deepEqual(connectionInterfaceWriteSpy.getCall(0).args[0].payload.end, 2) // prettier-ignore
+    assert.deepEqual(connectionInterfaceWriteSpy.getCall(1).args[0].payload.end, 4) // prettier-ignore
+    assert.deepEqual(connectionInterfaceWriteSpy.getCall(2).args[0].payload.end, 6) // prettier-ignore
+    assert.deepEqual(connectionInterfaceWriteSpy.getCall(3).args[0].payload.end, 8) // prettier-ignore
+    assert.deepEqual(connectionInterfaceWriteSpy.getCall(4).args[0].payload.end, 10) // prettier-ignore
+
+    // Send the odd numbered parts
+    for (const [index, part] of Array.from(
+      splitMessageIntoPieces(bigMessage, 1),
+    ).entries()) {
+      if (index % 2 === 1) {
+        source.push(part)
+      }
     }
 
     const receivedPacket = spy.getCall(0).args[0]

@@ -1,28 +1,76 @@
-import { DuplexPipeline, Message, Pipeline, TypeCache } from '@electricui/core'
-import { MESSAGEIDS, TYPES } from '@electricui/protocol-binary-constants'
+import { Message, Pipeline, ConnectionInterface } from '@electricui/core'
+import { TYPES } from '@electricui/protocol-binary-constants'
 import { OffsetMetadataCodec } from '@electricui/protocol-binary-codecs'
 import { IntervalTree, Interval } from 'node-interval-tree'
 
 export interface BinaryLargePacketHandlerDecoderOptions {
-  loopTime: number
+  loopTime?: number
+  fixedGraceTime?: number
+  connectionInterface: ConnectionInterface
+  externalTiming?: boolean
 }
 
 const dDecoder = require('debug')(
   'electricui-protocol-binary-large-packet-handler:decoder',
 )
 
+type getTimeFunc = () => number
+
 class LargePacketInternalBuffer {
   buffer: Buffer
   receivedRanges = new IntervalTree()
-  constructor(size: number) {
-    this.buffer = Buffer.alloc(size)
+  getTime: getTimeFunc
+  timings: number[] = []
+  circularTimingsBuffer = 20 // Just to avoid memory leaks
 
+  constructor(size: number, getTime: getTimeFunc) {
+    this.buffer = Buffer.alloc(size)
+    this.getTime = getTime
+
+    this.updateTimings = this.updateTimings.bind(this)
     this.updateProgress = this.updateProgress.bind(this)
     this.getProgress = this.getProgress.bind(this)
     this.getRangesNotReceived = this.getRangesNotReceived.bind(this)
     this.getTotal = this.getTotal.bind(this)
     this.addData = this.addData.bind(this)
     this.getData = this.getData.bind(this)
+    this.getAverageTimeBetweenPackets = this.getAverageTimeBetweenPackets.bind(
+      this,
+    )
+    this.getLastTimeReceived = this.getLastTimeReceived.bind(this)
+  }
+
+  public getLastTimeReceived() {
+    return this.timings[this.timings.length - 1]
+  }
+
+  private updateTimings() {
+    // Cap the progess timing data
+    if (this.timings.length > this.circularTimingsBuffer) {
+      this.timings.shift()
+    }
+
+    this.timings.push(this.getTime())
+  }
+
+  public getAverageTimeBetweenPackets() {
+    if (this.timings.length < 2) {
+      return null
+    }
+
+    // Iterate over every 'pair', by starting with the second element and iterating over the rest
+    // to find the differences in the timings, then reduce it to a sum, then divide it by the length to get an average
+
+    const sum = this.timings
+      .slice(1) // remove the first element
+      .map((prevTime, index) => {
+        const nextTime = this.timings[index + 1]
+
+        return nextTime - prevTime
+      })
+      .reduce((a, b) => a + b)
+
+    return sum / (this.timings.length - 1)
   }
 
   private updateProgress(start: number, end: number) {
@@ -98,6 +146,9 @@ class LargePacketInternalBuffer {
 
     // Update our progress
     this.updateProgress(offset, offset + payload.length)
+
+    // Update our timings
+    this.updateTimings()
   }
 
   public getData() {
@@ -110,14 +161,27 @@ class LargePacketInternalBuffer {
  */
 export default class BinaryLargePacketHandlerDecoder extends Pipeline {
   loopTime: number
+  fixedGraceTime: number
   metadataCodec = new OffsetMetadataCodec()
   buffers: {
     [messageID: string]: LargePacketInternalBuffer
   } = {}
+  metadata: {
+    [messageID: string]: any
+  } = {}
+  lastRequestBatchTime: {
+    [messageID: string]: number
+  } = {}
+  connectionInterface: ConnectionInterface
+  externalTiming: boolean
+  timer: NodeJS.Timer | null = null
 
   constructor(options: BinaryLargePacketHandlerDecoderOptions) {
     super()
-    this.loopTime = options.loopTime
+    this.loopTime = options.loopTime || 16
+    this.fixedGraceTime = options.fixedGraceTime || 50
+    this.connectionInterface = options.connectionInterface
+    this.externalTiming = options.externalTiming || false
 
     this.allocateBuffer = this.allocateBuffer.bind(this)
     this.deleteBuffer = this.deleteBuffer.bind(this)
@@ -125,15 +189,99 @@ export default class BinaryLargePacketHandlerDecoder extends Pipeline {
     this.hasBuffer = this.hasBuffer.bind(this)
     this.processOffsetMetadataPacket = this.processOffsetMetadataPacket.bind(this) // prettier-ignore
     this.receive = this.receive.bind(this)
+    this.tick = this.tick.bind(this)
+    this.teardown = this.teardown.bind(this)
+    this._getTime = this._getTime.bind(this)
+    this.getTime = this.getTime.bind(this)
+
+    if (!this.externalTiming) {
+      this.timer = setInterval(this.tick, this.loopTime)
+    }
   }
 
-  private allocateBuffer(messageID: string, size: number) {
+  /**
+   * Override this in the tests
+   */
+  public _getTime() {
+    return new Date().getTime()
+  }
+
+  private getTime() {
+    return this._getTime()
+  }
+
+  public teardown() {
+    if (this.timer) {
+      clearTimeout(this.timer)
+    }
+  }
+
+  public tick() {
+    dDecoder('Ticking')
+
+    const now = this.getTime()
+
+    // iterate over all the messageIDs we're storing
+    for (const messageID of Object.keys(this.buffers)) {
+      const buffer = this.buffers[messageID]
+
+      const averageTime = buffer.getAverageTimeBetweenPackets()
+
+      dDecoder(
+        `Average time between packets for ${messageID} is ${averageTime}ms`,
+      )
+
+      if (averageTime === null) {
+        continue
+      }
+
+      const lastTimeRequestedBatch = this.lastRequestBatchTime[messageID]
+
+      // if the time between now and the last batch request is below our threshold, don't ask again
+      if (
+        now - lastTimeRequestedBatch <
+        averageTime * 3 + this.fixedGraceTime
+      ) {
+        continue
+      }
+
+      const progress = buffer.getProgress()
+      const total = buffer.getTotal()
+      const remaining = total - progress
+      const lastTimeReceived = buffer.getLastTimeReceived()
+
+      const expectedTimeToFinish =
+        lastTimeReceived + (averageTime / progress) * remaining
+
+      // If we expect it to _be finished_ by now, request the remainder of the data again
+      if (expectedTimeToFinish + this.fixedGraceTime < now) {
+        for (const range of buffer.getRangesNotReceived()) {
+          this.requestRange(messageID, range.low, range.high)
+        }
+
+        // now is the last time we requested a batch
+        this.lastRequestBatchTime[messageID] = this.getTime()
+      }
+    }
+  }
+
+  private allocateBuffer(message: Message, size: number) {
+    const messageID = message.messageID
+
     dDecoder(`Allocating a buffer for ${messageID} of size ${size} bytes`)
-    this.buffers[messageID] = new LargePacketInternalBuffer(size)
+    this.buffers[messageID] = new LargePacketInternalBuffer(size, this.getTime)
+
+    dDecoder(`Recording metadata for ${messageID}`)
+    this.metadata[messageID] = Object.assign({}, message.metadata)
+
+    // Setup when we last requested the batch. It was 'roughly now'
+    this.lastRequestBatchTime[messageID] = this.getTime()
   }
 
   private deleteBuffer(messageID: string) {
     delete this.buffers[messageID]
+    delete this.metadata[messageID]
+    delete this.lastRequestBatchTime[messageID]
   }
 
   private getBuffer(messageID: string) {
@@ -163,9 +311,29 @@ export default class BinaryLargePacketHandlerDecoder extends Pipeline {
 
     const size = message.payload.end - message.payload.start
 
-    this.allocateBuffer(message.messageID, size)
+    this.allocateBuffer(message, size)
 
     return Promise.resolve()
+  }
+
+  private requestRange(messageID: string, start: number, end: number) {
+    dDecoder('Requesting the range of', messageID, 'from', start, 'to', end)
+
+    // The message is encoded by the codecs pipeline since it's passed back up through the entire connectionInterface
+    const message = new Message(messageID, {
+      start,
+      end,
+    })
+
+    message.metadata = Object.assign({}, this.metadata[messageID], {
+      query: true,
+      offset: null,
+      type: TYPES.OFFSET_METADATA,
+      ack: false, // TODO: Ack this and deal with it in a more clever manner
+      ackNum: 0,
+    })
+
+    return this.connectionInterface.write(message)
   }
 
   receive(message: Message) {
@@ -240,12 +408,12 @@ export default class BinaryLargePacketHandlerDecoder extends Pipeline {
       // We're no longer an offset packet
       completeMessage.metadata.offset = null
 
+      // Clean up after ourselves
+      this.deleteBuffer(message.messageID)
+
       // Push the completed message up the pipeline
       return this.push(completeMessage)
     }
-
-    // print the progress
-    dDecoder(`Progress:`, buffer.getRangesNotReceived())
 
     // We have dealt with the message
     return Promise.resolve()
