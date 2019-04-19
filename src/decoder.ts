@@ -38,6 +38,7 @@ class LargePacketInternalBuffer {
       this,
     )
     this.getLastTimeReceived = this.getLastTimeReceived.bind(this)
+    this.getDurationOfTransfer = this.getDurationOfTransfer.bind(this)
   }
 
   public getLastTimeReceived() {
@@ -51,6 +52,20 @@ class LargePacketInternalBuffer {
     }
 
     this.timings.push(this.getTime())
+  }
+
+  public getDurationOfTransfer() {
+    const firstTiming = this.timings[0]
+    const lastTiming = this.getLastTimeReceived()
+
+    if (
+      typeof firstTiming === 'undefined' ||
+      typeof lastTiming === 'undefined'
+    ) {
+      return 0
+    }
+
+    return lastTiming - firstTiming
   }
 
   public getAverageTimeBetweenPackets() {
@@ -149,6 +164,8 @@ class LargePacketInternalBuffer {
 
     // Update our timings
     this.updateTimings()
+
+    dDecoder('added ', payload.length, ' bytes of data data at offset', offset)
   }
 
   public getData() {
@@ -190,13 +207,8 @@ export default class BinaryLargePacketHandlerDecoder extends Pipeline {
     this.processOffsetMetadataPacket = this.processOffsetMetadataPacket.bind(this) // prettier-ignore
     this.receive = this.receive.bind(this)
     this.tick = this.tick.bind(this)
-    this.teardown = this.teardown.bind(this)
     this._getTime = this._getTime.bind(this)
     this.getTime = this.getTime.bind(this)
-
-    if (!this.externalTiming) {
-      this.timer = setInterval(this.tick, this.loopTime)
-    }
   }
 
   /**
@@ -210,15 +222,23 @@ export default class BinaryLargePacketHandlerDecoder extends Pipeline {
     return this._getTime()
   }
 
-  public teardown() {
+  onConnecting() {
+    dDecoder(`Large packet decoder onConnect`)
+
+    if (!this.externalTiming) {
+      this.timer = setInterval(this.tick, this.loopTime)
+    }
+  }
+
+  onDisconnecting() {
+    dDecoder(`Large packet decoder onDisconnect`)
+
     if (this.timer) {
       clearTimeout(this.timer)
     }
   }
 
   public tick() {
-    dDecoder('Ticking')
-
     const now = this.getTime()
 
     // iterate over all the messageIDs we're storing
@@ -227,13 +247,13 @@ export default class BinaryLargePacketHandlerDecoder extends Pipeline {
 
       const averageTime = buffer.getAverageTimeBetweenPackets()
 
-      dDecoder(
-        `Average time between packets for ${messageID} is ${averageTime}ms`,
-      )
-
       if (averageTime === null) {
         continue
       }
+
+      dDecoder(
+        `Average time between packets for ${messageID} is ${averageTime}ms`,
+      )
 
       const lastTimeRequestedBatch = this.lastRequestBatchTime[messageID]
 
@@ -399,6 +419,12 @@ export default class BinaryLargePacketHandlerDecoder extends Pipeline {
 
     // if it's complete, send the full packet
     if (progress === total) {
+      dDecoder(
+        `completed a packet for ${
+          message.messageID
+        } which took ${buffer.getDurationOfTransfer()}ms`,
+      )
+
       // Create a new message
       const completeMessage = new Message(message.messageID, buffer.getData())
 

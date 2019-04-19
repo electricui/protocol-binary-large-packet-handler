@@ -29,6 +29,29 @@ export class DeveloperNamespacePipelineSplitter extends Pipeline {
     // otherwise pass it to the developer pipeline
     return this.developer.receive(message)
   }
+
+  pipe(destination: Pipeline) {
+    // We have to pipe our internal pipes to 'fan back in'
+    this.internal.destination = destination
+    this.developer.destination = destination
+    return destination
+  }
+  onConnect() {
+    this.internal.onConnect()
+    this.developer.onConnect()
+  }
+  onConnecting() {
+    this.internal.onConnecting()
+    this.developer.onConnecting()
+  }
+  onDisconnect() {
+    this.internal.onDisconnect()
+    this.developer.onDisconnect()
+  }
+  onDisconnecting() {
+    this.internal.onDisconnecting()
+    this.developer.onDisconnecting()
+  }
 }
 
 /**
