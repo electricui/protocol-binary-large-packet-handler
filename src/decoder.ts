@@ -21,7 +21,7 @@ class LargePacketInternalBuffer {
   receivedRanges = new IntervalTree()
   getTime: getTimeFunc
   timings: number[] = []
-  circularTimingsBuffer = 20 // Just to avoid memory leaks
+  circularTimingsBuffer = 20 // Only sample the last 20 timings to avoid memory leaks
 
   constructor(size: number, getTime: getTimeFunc) {
     this.buffer = Buffer.alloc(size)
