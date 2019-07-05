@@ -362,21 +362,6 @@ export default class BinaryLargePacketHandlerDecoder extends Pipeline {
       return this.push(message)
     }
 
-    // If the packet has no offset, and it's not an offset metadata packet, push it on
-    if (
-      message.metadata.offset === null &&
-      message.metadata.type !== TYPES.OFFSET_METADATA
-    ) {
-      // dDecoder('encountered a packet with no offset')
-      return this.push(message)
-    }
-
-    // If the packet is a callback, push it on, this should never happen.
-    if (message.metadata.type === TYPES.CALLBACK) {
-      dDecoder('encountered a non-null callback packet?', message)
-      return this.push(message)
-    }
-
     // if it's a offset metadata packet, allocate the space for it
     if (message.metadata.type === TYPES.OFFSET_METADATA) {
       // Decode the packet, then call our processOffsetMetadataPacket function with the message, passing the promise through the chain.
@@ -391,6 +376,18 @@ export default class BinaryLargePacketHandlerDecoder extends Pipeline {
         message,
         this.processOffsetMetadataPacket,
       )
+    }
+
+    // If the packet has no offset, push it on
+    if (message.metadata.offset === null) {
+      // dDecoder('encountered a packet with no offset')
+      return this.push(message)
+    }
+
+    // If the packet is a callback, push it on, this should never happen.
+    if (message.metadata.type === TYPES.CALLBACK) {
+      dDecoder('encountered a non-null callback packet?', message)
+      return this.push(message)
     }
 
     // it's an offset packet
