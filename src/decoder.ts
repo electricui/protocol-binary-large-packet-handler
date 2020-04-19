@@ -1,7 +1,8 @@
-import { Message, Pipeline, ConnectionInterface } from '@electricui/core'
-import { TYPES } from '@electricui/protocol-binary-constants'
+import { ConnectionInterface, Message, Pipeline } from '@electricui/core'
+import { Interval, IntervalTree } from 'node-interval-tree'
+
 import { OffsetMetadataCodec } from '@electricui/protocol-binary-codecs'
-import { IntervalTree, Interval } from 'node-interval-tree'
+import { TYPES } from '@electricui/protocol-binary-constants'
 
 export interface BinaryLargePacketHandlerDecoderOptions {
   loopTime?: number
@@ -425,8 +426,8 @@ export default class BinaryLargePacketHandlerDecoder extends Pipeline {
       // Create a new message
       const completeMessage = new Message(message.messageID, buffer.getData())
 
-      // 'Copy' the metadata
-      completeMessage.metadata = message.metadata
+      // Copy the metadata
+      completeMessage.metadata = Object.assign({}, message.metadata)
 
       // We're no longer an offset packet
       completeMessage.metadata.offset = null

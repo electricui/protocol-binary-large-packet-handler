@@ -1,4 +1,5 @@
 import { Message, Pipeline } from '@electricui/core'
+
 import { TYPES } from '@electricui/protocol-binary-constants'
 
 export interface BinaryLargePacketHandlerEncoderOptions {
@@ -78,7 +79,7 @@ export default class BinaryLargePacketHandlerEncoder extends Pipeline {
     const splitter = splitBigPacket(message.payload, this.maxPayloadLength)
     for (const splitPacket of splitter) {
       const newPacket = new Message(message.messageID, splitPacket.payload)
-      newPacket.metadata = message.metadata // copy all metadata
+      newPacket.metadata = Object.assign({}, message.metadata) // copy all metadata
       newPacket.metadata.offset = splitPacket.offset
 
       // send all the parts
