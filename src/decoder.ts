@@ -321,9 +321,7 @@ export default class BinaryLargePacketHandlerDecoder extends Pipeline {
     )
     if (this.hasBuffer(message.messageID)) {
       console.error(
-        `Received an offset metadata message for a messageID, ${
-          message.messageID
-        } that already has a buffer.`,
+        `Received an offset metadata message for a messageID, ${message.messageID} that already has a buffer.`,
       )
       return Promise.resolve()
     }
@@ -396,9 +394,7 @@ export default class BinaryLargePacketHandlerDecoder extends Pipeline {
     // if we haven't allocated a buffer yet, error
     if (!this.hasBuffer(message.messageID)) {
       console.error(
-        `Received an offset packet for messageID, ${
-          message.messageID
-        } that doesn't have a buffer allocated.`,
+        `Received an offset packet for messageID, ${message.messageID} that doesn't have a buffer allocated.`,
       )
 
       return Promise.reject()
