@@ -1,4 +1,9 @@
-import { ConnectionInterface, Message, Pipeline } from '@electricui/core'
+import {
+  CancellationToken,
+  ConnectionInterface,
+  Message,
+  Pipeline,
+} from '@electricui/core'
 import { Interval, IntervalTree } from 'node-interval-tree'
 
 import { OffsetMetadataCodec } from '@electricui/protocol-binary-codecs'
@@ -274,10 +279,13 @@ export default class BinaryLargePacketHandlerDecoder extends Pipeline {
       const expectedTimeToFinish =
         lastTimeReceived + (averageTime / progress) * remaining
 
+      const cancellationToken = new CancellationToken()
+      cancellationToken.deadline(averageTime * 3)
+
       // If we expect it to _be finished_ by now, request the remainder of the data again
       if (expectedTimeToFinish + this.fixedGraceTime < now) {
         for (const range of buffer.getRangesNotReceived()) {
-          this.requestRange(messageID, range.low, range.high)
+          this.requestRange(messageID, range.low, range.high, cancellationToken)
         }
 
         // now is the last time we requested a batch
@@ -335,7 +343,12 @@ export default class BinaryLargePacketHandlerDecoder extends Pipeline {
     return Promise.resolve()
   }
 
-  private requestRange(messageID: string, start: number, end: number) {
+  private requestRange(
+    messageID: string,
+    start: number,
+    end: number,
+    cancellationToken: CancellationToken,
+  ) {
     dDecoder('Requesting the range of', messageID, 'from', start, 'to', end)
 
     // The message is encoded by the codecs pipeline since it's passed back up through the entire connectionInterface
@@ -352,13 +365,13 @@ export default class BinaryLargePacketHandlerDecoder extends Pipeline {
       ackNum: 0,
     })
 
-    return this.connectionInterface.write(message)
+    return this.connectionInterface.write(message, cancellationToken)
   }
 
-  receive(message: Message) {
+  receive(message: Message, cancellationToken: CancellationToken) {
     // Null payloads go immediately
     if (message.payload === null) {
-      return this.push(message)
+      return this.push(message, cancellationToken)
     }
 
     // if it's a offset metadata packet, allocate the space for it
@@ -380,13 +393,13 @@ export default class BinaryLargePacketHandlerDecoder extends Pipeline {
     // If the packet has no offset, push it on
     if (message.metadata.offset === null) {
       // dDecoder('encountered a packet with no offset')
-      return this.push(message)
+      return this.push(message, cancellationToken)
     }
 
     // If the packet is a callback, push it on, this should never happen.
     if (message.metadata.type === TYPES.CALLBACK) {
       dDecoder('encountered a non-null callback packet?', message)
-      return this.push(message)
+      return this.push(message, cancellationToken)
     }
 
     // it's an offset packet
@@ -432,7 +445,7 @@ export default class BinaryLargePacketHandlerDecoder extends Pipeline {
       this.deleteBuffer(message.messageID)
 
       // Push the completed message up the pipeline
-      return this.push(completeMessage)
+      return this.push(completeMessage, cancellationToken)
     }
 
     // We have dealt with the message

@@ -1,12 +1,17 @@
-import { DuplexPipeline, Message, Pipeline, TypeCache } from '@electricui/core'
-import { MESSAGEIDS, TYPES } from '@electricui/protocol-binary-constants'
-
 import BinaryLargePacketHandlerDecoder, {
   BinaryLargePacketHandlerDecoderOptions,
 } from '../src/decoder'
 import BinaryLargePacketHandlerEncoder, {
   BinaryLargePacketHandlerEncoderOptions,
 } from '../src/encoder'
+import {
+  CancellationToken,
+  DuplexPipeline,
+  Message,
+  Pipeline,
+  TypeCache,
+} from '@electricui/core'
+import { MESSAGEIDS, TYPES } from '@electricui/protocol-binary-constants'
 
 /**
  * DeveloperNamespacePipelineSplitter splits Pipelines into Developer and Internal namespaces
@@ -21,13 +26,13 @@ export class DeveloperNamespacePipelineSplitter extends Pipeline {
     this.developer = developer
   }
 
-  receive(message: Message) {
+  receive(message: Message, cancellationToken: CancellationToken) {
     // If it's internal, pass it to the internal pipeline
     if (message.metadata.internal) {
-      return this.internal.receive(message)
+      return this.internal.receive(message, cancellationToken)
     }
     // otherwise pass it to the developer pipeline
-    return this.developer.receive(message)
+    return this.developer.receive(message, cancellationToken)
   }
 
   pipe(destination: Pipeline) {

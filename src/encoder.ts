@@ -1,4 +1,4 @@
-import { Message, Pipeline } from '@electricui/core'
+import { CancellationToken, Message, Pipeline } from '@electricui/core'
 
 import { TYPES } from '@electricui/protocol-binary-constants'
 
@@ -40,10 +40,10 @@ export default class BinaryLargePacketHandlerEncoder extends Pipeline {
     this.maxPayloadLength = options.maxPayloadLength
   }
 
-  receive(message: Message) {
+  receive(message: Message, cancellationToken: CancellationToken) {
     // Null payloads go immediately
     if (message.payload === null) {
-      return this.push(message)
+      return this.push(message, cancellationToken)
     }
 
     // Check to make sure that the payload is actually a buffer
@@ -55,13 +55,13 @@ export default class BinaryLargePacketHandlerEncoder extends Pipeline {
 
     // If the packet is under the size threshold, just push it on
     if (message.payload.length <= this.maxPayloadLength) {
-      return this.push(message)
+      return this.push(message, cancellationToken)
     }
 
     // If the packet already has an offset, push it on
     if (message.metadata.offset !== null) {
       dEncoder('encountered a packet that already had an offset')
-      return this.push(message)
+      return this.push(message, cancellationToken)
     }
 
     // Create the start packet
@@ -73,7 +73,7 @@ export default class BinaryLargePacketHandlerEncoder extends Pipeline {
     offsetTransferStartPacket.metadata.internal = message.metadata.internal
 
     // Send the start packet
-    const promises = [this.push(offsetTransferStartPacket)]
+    const promises = [this.push(offsetTransferStartPacket, cancellationToken)]
 
     // Create the pieces
     const splitter = splitBigPacket(message.payload, this.maxPayloadLength)
@@ -83,7 +83,7 @@ export default class BinaryLargePacketHandlerEncoder extends Pipeline {
       newPacket.metadata.offset = splitPacket.offset
 
       // send all the parts
-      promises.push(this.push(newPacket))
+      promises.push(this.push(newPacket, cancellationToken))
     }
 
     return Promise.all(promises)
