@@ -1,9 +1,4 @@
-import {
-  CancellationToken,
-  ConnectionInterface,
-  Message,
-  Pipeline,
-} from '@electricui/core'
+import { CancellationToken, ConnectionInterface, Message, Pipeline } from '@electricui/core'
 import { Interval, IntervalTree } from 'node-interval-tree'
 
 import { OffsetMetadataCodec } from '@electricui/protocol-binary-codecs'
@@ -16,9 +11,7 @@ export interface BinaryLargePacketHandlerDecoderOptions {
   externalTiming?: boolean
 }
 
-const dDecoder = require('debug')(
-  'electricui-protocol-binary-large-packet-handler:decoder',
-)
+const dDecoder = require('debug')('electricui-protocol-binary-large-packet-handler:decoder')
 
 type getTimeFunc = () => number
 
@@ -40,9 +33,7 @@ class LargePacketInternalBuffer {
     this.getTotal = this.getTotal.bind(this)
     this.addData = this.addData.bind(this)
     this.getData = this.getData.bind(this)
-    this.getAverageTimeBetweenPackets = this.getAverageTimeBetweenPackets.bind(
-      this,
-    )
+    this.getAverageTimeBetweenPackets = this.getAverageTimeBetweenPackets.bind(this)
     this.getLastTimeReceived = this.getLastTimeReceived.bind(this)
     this.getDurationOfTransfer = this.getDurationOfTransfer.bind(this)
   }
@@ -64,10 +55,7 @@ class LargePacketInternalBuffer {
     const firstTiming = this.timings[0]
     const lastTiming = this.getLastTimeReceived()
 
-    if (
-      typeof firstTiming === 'undefined' ||
-      typeof lastTiming === 'undefined'
-    ) {
+    if (typeof firstTiming === 'undefined' || typeof lastTiming === 'undefined') {
       return 0
     }
 
@@ -257,17 +245,12 @@ export default class BinaryLargePacketHandlerDecoder extends Pipeline {
         continue
       }
 
-      dDecoder(
-        `Average time between packets for ${messageID} is ${averageTime}ms`,
-      )
+      dDecoder(`Average time between packets for ${messageID} is ${averageTime}ms`)
 
       const lastTimeRequestedBatch = this.lastRequestBatchTime[messageID]
 
       // if the time between now and the last batch request is below our threshold, don't ask again
-      if (
-        now - lastTimeRequestedBatch <
-        averageTime * 3 + this.fixedGraceTime
-      ) {
+      if (now - lastTimeRequestedBatch < averageTime * 3 + this.fixedGraceTime) {
         continue
       }
 
@@ -276,8 +259,7 @@ export default class BinaryLargePacketHandlerDecoder extends Pipeline {
       const remaining = total - progress
       const lastTimeReceived = buffer.getLastTimeReceived()
 
-      const expectedTimeToFinish =
-        lastTimeReceived + (averageTime / progress) * remaining
+      const expectedTimeToFinish = lastTimeReceived + (averageTime / progress) * remaining
 
       const cancellationToken = new CancellationToken()
       cancellationToken.deadline(averageTime * 3)
@@ -322,11 +304,7 @@ export default class BinaryLargePacketHandlerDecoder extends Pipeline {
   }
 
   private processOffsetMetadataPacket(message: Message) {
-    dDecoder(
-      'Decoded an offset metadata message',
-      message.messageID,
-      message.payload,
-    )
+    dDecoder('Decoded an offset metadata message', message.messageID, message.payload)
     if (this.hasBuffer(message.messageID)) {
       console.error(
         `Received an offset metadata message for a messageID, ${message.messageID} that already has a buffer.`,
@@ -343,12 +321,7 @@ export default class BinaryLargePacketHandlerDecoder extends Pipeline {
     return Promise.resolve()
   }
 
-  private requestRange(
-    messageID: string,
-    start: number,
-    end: number,
-    cancellationToken: CancellationToken,
-  ) {
+  private requestRange(messageID: string, start: number, end: number, cancellationToken: CancellationToken) {
     dDecoder('Requesting the range of', messageID, 'from', start, 'to', end)
 
     // The message is encoded by the codecs pipeline since it's passed back up through the entire connectionInterface
@@ -378,16 +351,12 @@ export default class BinaryLargePacketHandlerDecoder extends Pipeline {
     if (message.metadata.type === TYPES.OFFSET_METADATA) {
       // Decode the packet, then call our processOffsetMetadataPacket function with the message, passing the promise through the chain.
 
-      dDecoder(
-        'received the start of an offset data transfer',
-        message.messageID,
-      )
+      dDecoder('received the start of an offset data transfer', message.messageID)
+
+      message.payload = this.metadataCodec.decode(message.payload)
 
       // This doesn't happen automatically because of the ordering of the codec pipeline versus this pipeline
-      return this.metadataCodec.decode(
-        message,
-        this.processOffsetMetadataPacket,
-      )
+      return this.processOffsetMetadataPacket(message)
     }
 
     // If the packet has no offset, push it on
@@ -426,11 +395,7 @@ export default class BinaryLargePacketHandlerDecoder extends Pipeline {
 
     // if it's complete, send the full packet
     if (progress === total) {
-      dDecoder(
-        `completed a packet for ${
-          message.messageID
-        } which took ${buffer.getDurationOfTransfer()}ms`,
-      )
+      dDecoder(`completed a packet for ${message.messageID} which took ${buffer.getDurationOfTransfer()}ms`)
 
       // Create a new message
       const completeMessage = new Message(message.messageID, buffer.getData())
