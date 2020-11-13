@@ -1,10 +1,9 @@
-import 'mocha'
-
 import * as chai from 'chai'
 import * as sinon from 'sinon'
 
-import { Message, Sink, Source, ConnectionInterface } from '@electricui/core'
+import { CancellationToken, ConnectionInterface, Message, Sink, Source } from '@electricui/core'
 import { MESSAGEIDS, TYPES } from '@electricui/protocol-binary-constants'
+import { describe, it } from '@jest/globals'
 
 import BinaryLargePacketHandlerDecoder from '../src/decoder'
 
@@ -22,9 +21,7 @@ class TestSink extends Sink {
   }
 }
 
-function setupPipeline(
-  writeCallback: (message: Message) => Promise<any> = async () => {},
-) {
+function setupPipeline(writeCallback: (message: Message) => Promise<any> = async () => {}) {
   const spy = sinon.spy()
   const connectionInterfaceWriteSpy = sinon.spy()
   const connectionInterface = new ConnectionInterface()
@@ -55,12 +52,7 @@ function setupPipeline(
   }
 }
 
-function makeOffsetPacketPartMessage(
-  messageID: string,
-  type: TYPES,
-  offset: number,
-  payload: Buffer,
-) {
+function makeOffsetPacketPartMessage(messageID: string, type: TYPES, offset: number, payload: Buffer) {
   const message = new Message(messageID, payload)
   message.metadata.type = type
   message.metadata.offset = offset
@@ -117,7 +109,7 @@ describe('BinaryLargePacketHandlerDecoder', () => {
     const message = new Message('abc', Buffer.from([42]))
     message.metadata.type = TYPES.CUSTOM_MARKER
 
-    source.push(message)
+    source.push(message, new CancellationToken())
 
     assert.deepEqual(spy.getCall(0).args[0], message)
   })
@@ -126,36 +118,20 @@ describe('BinaryLargePacketHandlerDecoder', () => {
 
     const messageID = 'abc'
     const type = TYPES.CUSTOM_MARKER
-    const content = Buffer.from([
-      0x00,
-      0x01,
-      0x02,
-      0x03,
-      0x04,
-      0x05,
-      0x06,
-      0x07,
-      0x08,
-      0x09,
-    ])
+    const content = Buffer.from([0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09])
 
     // Begin the large packet transfer
-    const begin = new Message(
-      messageID,
-      Buffer.from(Uint16Array.from([0, 10]).buffer),
-    )
+    const begin = new Message(messageID, Buffer.from(Uint16Array.from([0, 10]).buffer))
     begin.metadata.type = TYPES.OFFSET_METADATA
 
-    source.push(begin)
+    source.push(begin, new CancellationToken())
 
     // Generate the messages, write them in reverse order
     const bigMessage = new Message(messageID, content)
     bigMessage.metadata.type = type
 
-    for (const part of Array.from(
-      splitMessageIntoPieces(bigMessage, 1),
-    ).reverse()) {
-      source.push(part)
+    for (const part of Array.from(splitMessageIntoPieces(bigMessage, 1)).reverse()) {
+      source.push(part, new CancellationToken())
     }
 
     const receivedPacket = spy.getCall(0).args[0]
@@ -166,34 +142,20 @@ describe('BinaryLargePacketHandlerDecoder', () => {
 
     const messageID = 'abc'
     const type = TYPES.CUSTOM_MARKER
-    const content = Buffer.from([
-      0x00,
-      0x01,
-      0x02,
-      0x03,
-      0x04,
-      0x05,
-      0x06,
-      0x07,
-      0x08,
-      0x09,
-    ])
+    const content = Buffer.from([0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09])
 
     // Begin the large packet transfer
-    const begin = new Message(
-      messageID,
-      Buffer.from(Uint16Array.from([0, 10]).buffer),
-    )
+    const begin = new Message(messageID, Buffer.from(Uint16Array.from([0, 10]).buffer))
     begin.metadata.type = TYPES.OFFSET_METADATA
 
-    source.push(begin)
+    source.push(begin, new CancellationToken())
 
     // Generate the messages, write them in forward
     const bigMessage = new Message(messageID, content)
     bigMessage.metadata.type = type
 
     for (const part of splitMessageIntoPieces(bigMessage, 1)) {
-      source.push(part)
+      source.push(part, new CancellationToken())
     }
 
     const receivedPacket = spy.getCall(0).args[0]
@@ -204,36 +166,20 @@ describe('BinaryLargePacketHandlerDecoder', () => {
 
     const messageID = 'abc'
     const type = TYPES.CUSTOM_MARKER
-    const content = Buffer.from([
-      0x00,
-      0x01,
-      0x02,
-      0x03,
-      0x04,
-      0x05,
-      0x06,
-      0x07,
-      0x08,
-      0x09,
-    ])
+    const content = Buffer.from([0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09])
 
     // Begin the large packet transfer
-    const begin = new Message(
-      messageID,
-      Buffer.from(Uint16Array.from([0, 10]).buffer),
-    )
+    const begin = new Message(messageID, Buffer.from(Uint16Array.from([0, 10]).buffer))
     begin.metadata.type = TYPES.OFFSET_METADATA
 
-    source.push(begin)
+    source.push(begin, new CancellationToken())
 
     // Generate the messages, write them in forward
     const bigMessage = new Message(messageID, content)
     bigMessage.metadata.type = type
 
-    for (const part of shuffle(
-      Array.from(splitMessageIntoPieces(bigMessage, 1)),
-    )) {
-      source.push(part)
+    for (const part of shuffle(Array.from(splitMessageIntoPieces(bigMessage, 1)))) {
+      source.push(part, new CancellationToken())
     }
 
     const receivedPacket = spy.getCall(0).args[0]
@@ -244,29 +190,20 @@ describe('BinaryLargePacketHandlerDecoder', () => {
 
     const messageID = 'abc'
     const type = TYPES.CUSTOM_MARKER
-    const content = Buffer.from(
-      Object.keys(Array(401).join('\u0000')).map(i => parseInt(i, 10)),
-    )
+    const content = Buffer.from(Object.keys(Array(401).join('\u0000')).map(i => parseInt(i, 10)))
 
     // Begin the large packet transfer
-    const begin = new Message(
-      messageID,
-      Buffer.from(Uint16Array.from([0, content.length]).buffer),
-    )
+    const begin = new Message(messageID, Buffer.from(Uint16Array.from([0, content.length]).buffer))
     begin.metadata.type = TYPES.OFFSET_METADATA
 
-    source.push(begin)
+    source.push(begin, new CancellationToken())
 
     // Generate the messages, write them in forward
     const bigMessage = new Message(messageID, content)
     bigMessage.metadata.type = type
 
-    for (const part of shuffle(
-      Array.from(
-        splitMessageIntoPieces(bigMessage, Math.floor(Math.random() * 100)),
-      ),
-    )) {
-      source.push(part)
+    for (const part of shuffle(Array.from(splitMessageIntoPieces(bigMessage, Math.floor(Math.random() * 100))))) {
+      source.push(part, new CancellationToken())
     }
 
     const receivedPacket = spy.getCall(0).args[0]
@@ -277,50 +214,28 @@ describe('BinaryLargePacketHandlerDecoder', () => {
       // console.log('received message in the write callback, ', message)
     }
 
-    const {
-      source,
-      sink,
-      spy,
-      decoder,
-      connectionInterfaceWriteSpy,
-    } = setupPipeline(writeCallback)
+    const { source, sink, spy, decoder, connectionInterfaceWriteSpy } = setupPipeline(writeCallback)
 
     const messageID = 'abc'
     const type = TYPES.CUSTOM_MARKER
-    const content = Buffer.from([
-      0x00,
-      0x01,
-      0x02,
-      0x03,
-      0x04,
-      0x05,
-      0x06,
-      0x07,
-      0x08,
-      0x09,
-    ])
+    const content = Buffer.from([0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09])
 
     // Begin the large packet transfer
-    const begin = new Message(
-      messageID,
-      Buffer.from(Uint16Array.from([0, content.length]).buffer),
-    )
+    const begin = new Message(messageID, Buffer.from(Uint16Array.from([0, content.length]).buffer))
     begin.metadata.type = TYPES.OFFSET_METADATA
 
     decoder._getTime = () => 0
 
-    source.push(begin)
+    source.push(begin, new CancellationToken())
 
     // Generate the messages, write them in forward
     const bigMessage = new Message(messageID, content)
     bigMessage.metadata.type = type
 
     // Only send the even numbered parts
-    for (const [index, part] of Array.from(
-      splitMessageIntoPieces(bigMessage, 1),
-    ).entries()) {
+    for (const [index, part] of Array.from(splitMessageIntoPieces(bigMessage, 1)).entries()) {
       if (index % 2 === 0) {
-        source.push(part)
+        source.push(part, new CancellationToken())
       }
       decoder.tick()
     }
@@ -342,11 +257,9 @@ describe('BinaryLargePacketHandlerDecoder', () => {
     assert.deepEqual(connectionInterfaceWriteSpy.getCall(4).args[0].payload.end, 10) // prettier-ignore
 
     // Send the odd numbered parts
-    for (const [index, part] of Array.from(
-      splitMessageIntoPieces(bigMessage, 1),
-    ).entries()) {
+    for (const [index, part] of Array.from(splitMessageIntoPieces(bigMessage, 1)).entries()) {
       if (index % 2 === 1) {
-        source.push(part)
+        source.push(part, new CancellationToken())
       }
     }
 
