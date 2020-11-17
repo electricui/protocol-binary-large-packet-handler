@@ -14,7 +14,8 @@
     "paths": {
       "*": ["node_modules/*", "src/types/*"]
     },
-    "types": ["jest"]
+    "types": ["jest"],
+    "jsx": "react"
   },
   "include": ["src/**/*", "index.ts"]
 }
