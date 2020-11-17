@@ -1,6 +1,6 @@
 {
   "name": "@electricui/protocol-binary-large-packet-handler",
-  "version": "0.7.26-prerelease.0",
+  "version": "0.7.26-prerelease.1",
   "description": "ElectricUI Binary Large Packet Handler",
   "electricui-dev": true,
   "author": "Electric UI <support@electricui.com> (https://electricui.com)",
@@ -14,15 +14,15 @@
     "manifest.json"
   ],
   "dependencies": {
-    "@electricui/core": "^0.7.26-prerelease.0",
-    "@electricui/protocol-binary-codecs": "^0.7.26-prerelease.0",
-    "@electricui/protocol-binary-constants": "^0.7.26-prerelease.0",
+    "@electricui/core": "^0.7.26-prerelease.1",
+    "@electricui/protocol-binary-codecs": "^0.7.26-prerelease.1",
+    "@electricui/protocol-binary-constants": "^0.7.26-prerelease.1",
     "debug": "^4.1.1",
     "node-interval-tree": "^1.3.3"
   },
   "devDependencies": {
     "@electricui/build-rollup-config": "^0.7.23",
-    "@electricui/jest-config": "^0.7.26-prerelease.0",
+    "@electricui/jest-config": "^0.7.26-prerelease.1",
     "@jest/globals": "^26.6.2",
     "@sinonjs/fake-timers": "^6.0.1",
     "@types/bluebird": "^3.5.25",
