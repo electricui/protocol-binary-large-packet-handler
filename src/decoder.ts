@@ -9,6 +9,7 @@ export interface BinaryLargePacketHandlerDecoderOptions {
   fixedGraceTime?: number
   connectionInterface: ConnectionInterface
   externalTiming?: boolean
+  hashFromMessage?: (message: Message) => string
 }
 
 const dDecoder = require('debug')('electricui-protocol-binary-large-packet-handler:decoder')
@@ -16,11 +17,11 @@ const dDecoder = require('debug')('electricui-protocol-binary-large-packet-handl
 type getTimeFunc = () => number
 
 class LargePacketInternalBuffer {
-  buffer: Buffer
-  receivedRanges = new IntervalTree()
-  getTime: getTimeFunc
-  timings: number[] = []
-  circularTimingsBuffer = 20 // Only sample the last 20 timings to avoid memory leaks
+  private buffer: Buffer
+  private receivedRanges = new IntervalTree()
+  private getTime: getTimeFunc
+  private timings: number[] = []
+  private circularTimingsBuffer = 20 // Only sample the last 20 timings to avoid memory leaks
 
   constructor(size: number, getTime: getTimeFunc) {
     this.buffer = Buffer.alloc(size)
@@ -171,21 +172,33 @@ class LargePacketInternalBuffer {
  * BinaryLargePacketHandlerDecoder decodes large packets
  */
 export default class BinaryLargePacketHandlerDecoder extends Pipeline {
-  loopTime: number
-  fixedGraceTime: number
-  metadataCodec = new OffsetMetadataCodec()
-  buffers: {
-    [messageID: string]: LargePacketInternalBuffer
+  private loopTime: number
+  private fixedGraceTime: number
+  private metadataCodec = new OffsetMetadataCodec()
+  private buffers: {
+    [bufferHash: string]: LargePacketInternalBuffer
   } = {}
-  metadata: {
-    [messageID: string]: any
+  private metadata: {
+    [bufferHash: string]: any
   } = {}
-  lastRequestBatchTime: {
-    [messageID: string]: number
+  private messageIDs: {
+    [bufferHash: string]: string
   } = {}
-  connectionInterface: ConnectionInterface
-  externalTiming: boolean
-  timer: NodeJS.Timer | null = null
+  private lastRequestBatchTime: {
+    [bufferHash: string]: number
+  } = {}
+  private connectionInterface: ConnectionInterface
+  private externalTiming: boolean
+  private timer: NodeJS.Timer | null = null
+  /**
+   * Generate buckets of unique messages using this function.
+   *
+   * By default, just use the messageID.
+   *
+   * If using sequence numbers, set this to something that includes both the messageID
+   * and the sequence number.
+   */
+  private hashFromMessage: (message: Message) => string
 
   constructor(options: BinaryLargePacketHandlerDecoderOptions) {
     super()
@@ -193,6 +206,7 @@ export default class BinaryLargePacketHandlerDecoder extends Pipeline {
     this.fixedGraceTime = options.fixedGraceTime || 50
     this.connectionInterface = options.connectionInterface
     this.externalTiming = options.externalTiming || false
+    this.hashFromMessage = options.hashFromMessage ? options.hashFromMessage : (message: Message) => message.messageID
 
     this.allocateBuffer = this.allocateBuffer.bind(this)
     this.deleteBuffer = this.deleteBuffer.bind(this)
@@ -209,7 +223,7 @@ export default class BinaryLargePacketHandlerDecoder extends Pipeline {
    * Override this in the tests
    */
   public _getTime() {
-    return new Date().getTime()
+    return Date.now()
   }
 
   private getTime() {
@@ -236,8 +250,8 @@ export default class BinaryLargePacketHandlerDecoder extends Pipeline {
     const now = this.getTime()
 
     // iterate over all the messageIDs we're storing
-    for (const messageID of Object.keys(this.buffers)) {
-      const buffer = this.buffers[messageID]
+    for (const bufferHash of Object.keys(this.buffers)) {
+      const buffer = this.buffers[bufferHash]
 
       const averageTime = buffer.getAverageTimeBetweenPackets()
 
@@ -245,9 +259,9 @@ export default class BinaryLargePacketHandlerDecoder extends Pipeline {
         continue
       }
 
-      dDecoder(`Average time between packets for ${messageID} is ${averageTime}ms`)
+      dDecoder(`Average time between packets for ${bufferHash} is ${averageTime}ms`)
 
-      const lastTimeRequestedBatch = this.lastRequestBatchTime[messageID]
+      const lastTimeRequestedBatch = this.lastRequestBatchTime[bufferHash]
 
       // if the time between now and the last batch request is below our threshold, don't ask again
       if (now - lastTimeRequestedBatch < averageTime * 3 + this.fixedGraceTime) {
@@ -267,53 +281,56 @@ export default class BinaryLargePacketHandlerDecoder extends Pipeline {
       // If we expect it to _be finished_ by now, request the remainder of the data again
       if (expectedTimeToFinish + this.fixedGraceTime < now) {
         for (const range of buffer.getRangesNotReceived()) {
-          this.requestRange(messageID, range.low, range.high, cancellationToken)
+          this.requestRange(bufferHash, range.low, range.high, cancellationToken)
         }
 
         // now is the last time we requested a batch
-        this.lastRequestBatchTime[messageID] = this.getTime()
+        this.lastRequestBatchTime[bufferHash] = this.getTime()
       }
     }
   }
 
   private allocateBuffer(message: Message, size: number) {
-    const messageID = message.messageID
+    const bufferHash = this.hashFromMessage(message)
 
-    dDecoder(`Allocating a buffer for ${messageID} of size ${size} bytes`)
-    this.buffers[messageID] = new LargePacketInternalBuffer(size, this.getTime)
+    dDecoder(`Allocating a buffer for ${bufferHash} of size ${size} bytes`)
+    this.buffers[bufferHash] = new LargePacketInternalBuffer(size, this.getTime)
 
-    dDecoder(`Recording metadata for ${messageID}`)
-    this.metadata[messageID] = Object.assign({}, message.metadata)
+    dDecoder(`Recording metadata for ${bufferHash}`)
+    this.metadata[bufferHash] = Object.assign({}, message.metadata)
 
     // Setup when we last requested the batch. It was 'roughly now'
-    this.lastRequestBatchTime[messageID] = this.getTime()
+    this.lastRequestBatchTime[bufferHash] = this.getTime()
+
+    // Setup the messageID of this bufferHash
+    this.messageIDs[bufferHash] = message.messageID
   }
 
-  private deleteBuffer(messageID: string) {
-    delete this.buffers[messageID]
-    delete this.metadata[messageID]
-    delete this.lastRequestBatchTime[messageID]
+  private deleteBuffer(bufferHash: string) {
+    delete this.buffers[bufferHash]
+    delete this.metadata[bufferHash]
+    delete this.lastRequestBatchTime[bufferHash]
+    delete this.messageIDs[bufferHash]
   }
 
-  private getBuffer(messageID: string) {
-    return this.buffers[messageID] || null
+  private getBuffer(bufferHash: string) {
+    return this.buffers[bufferHash] || null
   }
 
-  private hasBuffer(messageID: string) {
-    return this.getBuffer(messageID) !== null
+  private hasBuffer(bufferHash: string) {
+    return this.getBuffer(bufferHash) !== null
   }
 
   private processOffsetMetadataPacket(message: Message) {
-    dDecoder('Decoded an offset metadata message', message.messageID, message.payload)
-    if (this.hasBuffer(message.messageID)) {
-      console.error(
-        `Received an offset metadata message for a messageID, ${message.messageID} that already has a buffer.`,
-      )
+    const bufferHash = this.hashFromMessage(message)
+
+    dDecoder('Decoded an offset metadata message', bufferHash, message.payload)
+    if (this.hasBuffer(bufferHash)) {
+      console.error(`Received an offset metadata message for a bufferHash, ${bufferHash} that already has a buffer.`)
       return Promise.resolve()
     }
 
     // Allocate a buffer that is the size of the message
-
     const size = message.payload.end - message.payload.start
 
     this.allocateBuffer(message, size)
@@ -321,8 +338,16 @@ export default class BinaryLargePacketHandlerDecoder extends Pipeline {
     return Promise.resolve()
   }
 
-  private requestRange(messageID: string, start: number, end: number, cancellationToken: CancellationToken) {
-    dDecoder('Requesting the range of', messageID, 'from', start, 'to', end)
+  private requestRange(bufferHash: string, start: number, end: number, cancellationToken: CancellationToken) {
+    dDecoder('Requesting the range of', bufferHash, 'from', start, 'to', end)
+
+    // TODO: get the messageID of this bufferHash
+    const messageID = this.messageIDs[bufferHash]
+
+    if (!messageID) {
+      console.error(`Couldn't find the messageID for bufferHash ${bufferHash}.`)
+      return Promise.resolve()
+    }
 
     // The message is encoded by the codecs pipeline since it's passed back up through the entire connectionInterface
     const message = new Message(messageID, {
@@ -330,7 +355,7 @@ export default class BinaryLargePacketHandlerDecoder extends Pipeline {
       end,
     })
 
-    message.metadata = Object.assign({}, this.metadata[messageID], {
+    message.metadata = Object.assign({}, this.metadata[bufferHash], {
       query: true,
       offset: null,
       type: TYPES.OFFSET_METADATA,
@@ -347,11 +372,13 @@ export default class BinaryLargePacketHandlerDecoder extends Pipeline {
       return this.push(message, cancellationToken)
     }
 
+    const bufferHash = this.hashFromMessage(message)
+
     // if it's a offset metadata packet, allocate the space for it
     if (message.metadata.type === TYPES.OFFSET_METADATA) {
       // Decode the packet, then call our processOffsetMetadataPacket function with the message, passing the promise through the chain.
 
-      dDecoder('received the start of an offset data transfer', message.messageID)
+      dDecoder('received the start of an offset data transfer', bufferHash)
 
       message.payload = this.metadataCodec.decode(message.payload)
 
@@ -374,16 +401,14 @@ export default class BinaryLargePacketHandlerDecoder extends Pipeline {
     // it's an offset packet
 
     // if we haven't allocated a buffer yet, error
-    if (!this.hasBuffer(message.messageID)) {
-      console.error(
-        `Received an offset packet for messageID, ${message.messageID} that doesn't have a buffer allocated.`,
-      )
+    if (!this.hasBuffer(bufferHash)) {
+      console.error(`Received an offset packet for messageID, ${bufferHash} that doesn't have a buffer allocated.`)
 
       return Promise.reject()
     }
 
     // we have a packet, and a buffer allocated, place it in the buffer
-    const buffer = this.getBuffer(message.messageID)
+    const buffer = this.getBuffer(bufferHash)
 
     buffer.addData(message.metadata.offset, message.payload)
 
@@ -395,10 +420,17 @@ export default class BinaryLargePacketHandlerDecoder extends Pipeline {
 
     // if it's complete, send the full packet
     if (progress === total) {
-      dDecoder(`completed a packet for ${message.messageID} which took ${buffer.getDurationOfTransfer()}ms`)
+      dDecoder(`completed a packet for ${bufferHash} which took ${buffer.getDurationOfTransfer()}ms`)
+
+      const messageID = this.messageIDs[bufferHash]
+
+      if (!messageID) {
+        console.error(`Couldn't find the messageID for bufferHash ${bufferHash}.`)
+        return Promise.reject()
+      }
 
       // Create a new message
-      const completeMessage = new Message(message.messageID, buffer.getData())
+      const completeMessage = new Message(messageID, buffer.getData())
 
       // Copy the metadata
       completeMessage.metadata = Object.assign({}, message.metadata)
@@ -407,7 +439,7 @@ export default class BinaryLargePacketHandlerDecoder extends Pipeline {
       completeMessage.metadata.offset = null
 
       // Clean up after ourselves
-      this.deleteBuffer(message.messageID)
+      this.deleteBuffer(bufferHash)
 
       // Push the completed message up the pipeline
       return this.push(completeMessage, cancellationToken)

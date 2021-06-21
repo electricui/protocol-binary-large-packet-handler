@@ -40,7 +40,7 @@ export default class BinaryLargePacketHandlerEncoder extends Pipeline {
     this.maxPayloadLength = options.maxPayloadLength
   }
 
-  receive(message: Message, cancellationToken: CancellationToken) {
+ async receive(message: Message, cancellationToken: CancellationToken) {
     // Null payloads go immediately
     if (message.payload === null) {
       return this.push(message, cancellationToken)
@@ -86,6 +86,6 @@ export default class BinaryLargePacketHandlerEncoder extends Pipeline {
       promises.push(this.push(newPacket, cancellationToken))
     }
 
-    return Promise.all(promises)
+    await Promise.all(promises)
   }
 }
