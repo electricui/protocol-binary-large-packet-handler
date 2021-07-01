@@ -1,5 +1,6 @@
-import { CancellationToken, ConnectionInterface, Message, Pipeline } from '@electricui/core'
+import { ConnectionInterface, Message, Pipeline } from '@electricui/core'
 import { Interval, IntervalTree } from 'node-interval-tree'
+import { CancellationToken } from '@electricui/async-utilities'
 
 import { OffsetMetadataCodec } from '@electricui/protocol-binary-codecs'
 import { TYPES } from '@electricui/protocol-binary-constants'

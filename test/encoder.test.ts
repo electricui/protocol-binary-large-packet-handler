@@ -1,9 +1,10 @@
 import * as chai from 'chai'
 import * as sinon from 'sinon'
 
-import { CancellationToken, Message, Sink, Source } from '@electricui/core'
+import { Message, Sink, Source } from '@electricui/core'
 import { MESSAGEIDS, TYPES } from '@electricui/protocol-binary-constants'
 import { describe, it, xit } from '@jest/globals'
+import { CancellationToken } from '@electricui/async-utilities'
 
 import BinaryLargePacketHandlerEncoder from '../src/encoder'
 

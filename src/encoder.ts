@@ -1,4 +1,5 @@
-import { CancellationToken, Message, Pipeline } from '@electricui/core'
+import { Message, Pipeline } from '@electricui/core'
+import { CancellationToken } from '@electricui/async-utilities'
 
 import { TYPES } from '@electricui/protocol-binary-constants'
 
@@ -6,9 +7,7 @@ export interface BinaryLargePacketHandlerEncoderOptions {
   maxPayloadLength: number
 }
 
-const dEncoder = require('debug')(
-  'electricui-protocol-binary-large-packet-handler:encoder',
-)
+const dEncoder = require('debug')('electricui-protocol-binary-large-packet-handler:encoder')
 
 // A generator function that splits a buffer into small pieces
 function* splitBigPacket(buf: Buffer, maxPacketSize: number) {
@@ -40,7 +39,7 @@ export default class BinaryLargePacketHandlerEncoder extends Pipeline {
     this.maxPayloadLength = options.maxPayloadLength
   }
 
- async receive(message: Message, cancellationToken: CancellationToken) {
+  async receive(message: Message, cancellationToken: CancellationToken) {
     // Null payloads go immediately
     if (message.payload === null) {
       return this.push(message, cancellationToken)
@@ -65,10 +64,7 @@ export default class BinaryLargePacketHandlerEncoder extends Pipeline {
     }
 
     // Create the start packet
-    const offsetTransferStartPacket = new Message(
-      message.messageID,
-      Buffer.from(Uint16Array.from([0, 10]).buffer),
-    )
+    const offsetTransferStartPacket = new Message(message.messageID, Buffer.from(Uint16Array.from([0, 10]).buffer))
     offsetTransferStartPacket.metadata.type = TYPES.OFFSET_METADATA
     offsetTransferStartPacket.metadata.internal = message.metadata.internal
 
