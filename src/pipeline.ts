@@ -1,18 +1,8 @@
-import BinaryLargePacketHandlerDecoder, {
-  BinaryLargePacketHandlerDecoderOptions,
-} from '../src/decoder'
-import BinaryLargePacketHandlerEncoder, {
-  BinaryLargePacketHandlerEncoderOptions,
-} from '../src/encoder'
-import {
-  CancellationToken,
-  DuplexPipeline,
-  Message,
-  Pipeline,
-  TypeCache,
-} from '@electricui/core'
+import BinaryLargePacketHandlerDecoder, { BinaryLargePacketHandlerDecoderOptions } from '../src/decoder'
+import BinaryLargePacketHandlerEncoder, { BinaryLargePacketHandlerEncoderOptions } from '../src/encoder'
+import { DuplexPipeline, Message, Pipeline, TypeCache } from '@electricui/core'
 import { MESSAGEIDS, TYPES } from '@electricui/protocol-binary-constants'
-
+import { CancellationToken } from '@electricui/async-utilities'
 /**
  * DeveloperNamespacePipelineSplitter splits Pipelines into Developer and Internal namespaces
  */
@@ -72,10 +62,7 @@ export default class BinaryLargePacketHandlerPipeline extends DuplexPipeline {
   readPipeline: DeveloperNamespacePipelineSplitter
   writePipeline: DeveloperNamespacePipelineSplitter
 
-  constructor(
-    options: BinaryLargePacketHandlerDecoderOptions &
-      BinaryLargePacketHandlerEncoderOptions,
-  ) {
+  constructor(options: BinaryLargePacketHandlerDecoderOptions & BinaryLargePacketHandlerEncoderOptions) {
     super()
 
     this.readPipelineInternal = new BinaryLargePacketHandlerDecoder(options)
@@ -83,13 +70,7 @@ export default class BinaryLargePacketHandlerPipeline extends DuplexPipeline {
     this.readPipelineDeveloper = new BinaryLargePacketHandlerDecoder(options)
     this.writePipelineDeveloper = new BinaryLargePacketHandlerEncoder(options)
 
-    this.readPipeline = new DeveloperNamespacePipelineSplitter(
-      this.readPipelineInternal,
-      this.readPipelineDeveloper,
-    )
-    this.writePipeline = new DeveloperNamespacePipelineSplitter(
-      this.writePipelineInternal,
-      this.writePipelineDeveloper,
-    )
+    this.readPipeline = new DeveloperNamespacePipelineSplitter(this.readPipelineInternal, this.readPipelineDeveloper)
+    this.writePipeline = new DeveloperNamespacePipelineSplitter(this.writePipelineInternal, this.writePipelineDeveloper)
   }
 }
