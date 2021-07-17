@@ -64,7 +64,10 @@ export default class BinaryLargePacketHandlerEncoder extends Pipeline {
     }
 
     // Create the start packet
-    const offsetTransferStartPacket = new Message(message.messageID, Buffer.from(Uint16Array.from([0, 10]).buffer))
+    const payload = Buffer.allocUnsafe(4)
+    payload.writeUInt16LE(0, 0)
+    payload.writeUInt16LE(message.payload.byteLength, 2)
+    const offsetTransferStartPacket = new Message(message.messageID, payload)
     offsetTransferStartPacket.metadata.type = TYPES.OFFSET_METADATA
     offsetTransferStartPacket.metadata.internal = message.metadata.internal
 

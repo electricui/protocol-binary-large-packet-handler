@@ -161,7 +161,7 @@ class LargePacketInternalBuffer {
     // Update our timings
     this.updateTimings()
 
-    dDecoder('added ', payload.length, ' bytes of data data at offset', offset)
+    dDecoder('added ', payload.length, ' bytes of data at offset', offset)
   }
 
   public getData() {
@@ -418,6 +418,7 @@ export default class BinaryLargePacketHandlerDecoder extends Pipeline {
     const total = buffer.getTotal()
 
     // TODO: send a progress update
+    dDecoder(`progress is ${progress} / ${total}`)
 
     // if it's complete, send the full packet
     if (progress === total) {
