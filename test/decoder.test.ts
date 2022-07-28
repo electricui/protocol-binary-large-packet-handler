@@ -275,4 +275,55 @@ describe('BinaryLargePacketHandlerDecoder', () => {
     const receivedPacket = spy.getCall(0).args[0]
     assert.isTrue(content.equals(receivedPacket.payload))
   })
+
+  it('if a new bulk transfer comes through, the old one is wiped', async () => {
+    const { source, sink, spy } = setupPipeline()
+
+    const cancellationToken = new CancellationToken()
+
+    const messageID = 'abc'
+    const type = TYPES.CUSTOM_MARKER
+    const content = Buffer.from(Object.keys(Array(401).join('\u0000')).map(i => parseInt(i, 10)))
+
+    // Begin the large packet transfer
+    const begin = new Message(messageID, getOffsetStartBuffer(0, content.length))
+    begin.metadata.type = TYPES.OFFSET_METADATA
+
+    await source.push(begin, cancellationToken)
+
+    // Generate the messages, write them in forward
+    const bigMessage = new Message(messageID, content)
+    bigMessage.metadata.type = type
+
+    // start sending the parts
+    let counter = 0
+    for (const part of splitMessageIntoPieces(bigMessage, 10)) {
+      await source.push(part, cancellationToken)
+      counter++
+
+      // After 10, stop
+      if (counter > 10) {
+        break
+      }
+    }
+
+    const content2 = Buffer.from(Object.keys(Array(200).join('\u0000')).map(i => parseInt(i, 10)))
+
+    const bigMessage2 = new Message(messageID, content2)
+    bigMessage2.metadata.type = type
+
+    const begin2 = new Message(messageID, getOffsetStartBuffer(0, content2.length))
+    begin2.metadata.type = TYPES.OFFSET_METADATA
+
+    // start another large packet transfer
+    await source.push(begin2, cancellationToken)
+
+    // send it all again
+    for (const part of splitMessageIntoPieces(bigMessage2, 10)) {
+      await source.push(part, cancellationToken)
+    }
+
+    const receivedPacket = spy.getCall(0).args[0]
+    assert.isTrue(content2.equals(receivedPacket.payload))
+  })
 })

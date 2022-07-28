@@ -327,8 +327,9 @@ export default class BinaryLargePacketHandlerDecoder extends Pipeline {
 
     dDecoder('Decoded an offset metadata message', bufferHash, message.payload)
     if (this.hasBuffer(bufferHash)) {
-      console.error(`Received an offset metadata message for a bufferHash, ${bufferHash} that already has a buffer.`)
-      return Promise.resolve()
+      console.warn(
+        `Received an offset metadata message for a bufferHash, ${bufferHash} that already has a buffer. Wiping buffer`,
+      )
     }
 
     // Allocate a buffer that is the size of the message
